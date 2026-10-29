@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Portal | Chemistry by Krishan Jayarathna</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 flex flex-col items-center min-h-screen p-4 md:p-8 font-sans">
+
+    <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-100 w-full max-w-3xl mt-8">
+        
+        <!-- LOGIN SCREEN -->
+        <div id="login-screen" class="max-w-sm mx-auto flex flex-col gap-5 text-center">
+            <div>
+                <h2 class="text-2xl font-bold text-blue-600">Student Portal</h2>
+                <p class="text-slate-500 text-sm">Chemistry by Krishan Jayarathna</p>
+            </div>
+            
+            <div class="text-left">
+                <label class="block text-sm font-semibold text-slate-700 mb-1">A/L Batch Year</label>
+                <select id="year" class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition">
+                    <option value="2028">2028 A/L</option>
+                    <option value="2027">2027 A/L</option>
+                    <option value="2026">2026 A/L</option>
+                    <option value="2025">2025 A/L</option>
+                </select>
+            </div>
+
+            <div class="text-left">
+                <label class="block text-sm font-semibold text-slate-700 mb-1">Student ID</label>
+                <input type="text" id="studentId" placeholder="e.g., EMA2028001" class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" onkeypress="if(event.key === 'Enter') login()">
+            </div>
+
+            <div id="errorMsg" class="text-red-500 text-sm font-medium hidden">ID not found or network error.</div>
+            
+            <button id="loginBtn" onclick="login()" class="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition">Access Dashboard</button>
+        </div>
+
+        <!-- DASHBOARD SCREEN -->
+        <div id="dashboard" class="hidden">
+            <div class="flex justify-between items-end border-b border-slate-200 pb-4 mb-6">
+                <div>
+                    <h2 class="text-xl font-bold text-slate-800">Welcome, <span id="studentNameDisplay" class="text-blue-600"></span></h2>
+                    <p class="text-slate-500 text-sm font-medium">ID: <span id="studentIdDisplay"></span></p>
+                </div>
+                <button onclick="logout()" class="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-sm font-semibold transition">Log Out</button>
+            </div>
+
+            <!-- Tabs -->
+            <div class="flex gap-2 mb-6">
+                <button id="btn-chempulse" onclick="switchTab('chempulse')" class="flex-1 py-2 px-4 rounded-lg font-semibold text-sm transition bg-blue-600 text-white">Chempulse Progress</button>
+                <button id="btn-exams" onclick="switchTab('exams')" class="flex-1 py-2 px-4 rounded-lg font-semibold text-sm transition bg-slate-100 text-slate-600 hover:bg-slate-200">Monthly Exams</button>
+            </div>
+
+            <!-- Chempulse Tab -->
+            <div id="tab-chempulse" class="block animate-fade-in">
+                <div class="p-4 border border-slate-100 rounded-xl bg-slate-50">
+                    <canvas id="chempulseChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Exams Tab -->
+            <div id="tab-exams" class="hidden animate-fade-in">
+                <div class="p-4 border border-slate-100 rounded-xl bg-slate-50">
+                    <canvas id="examChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // YOUR LIVE GOOGLE SHEETS CSV LINKS
+        const chempulseLinks = {
+            "2028": "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ4zXL7M9u7lRcLNWze91wU_W1L6PWLxpjpvFXI5wjHEu__BoHfj2QWCL_4KpdrR-V1puyMfByyFqj6/pub?gid=2083058040&single=true&output=csv",
+            "2027": "",
+            "2026": "",
+            "2025": ""
+        };
+
+        const examLinks = {
+            "2028": "YOUR_MONTHLY_EXAMS_CSV_LINK_HERE", // Replace this when you publish the Exams tab
+            "2027": "",
+            "2026": "",
+            "2025": ""
+        };
+
+        let chempulseChart = null;
+        let examChart = null;
+
+        // Custom function to parse your wide CSV format (Name, Index No, Paper 1, Paper 2...)
+        async function fetchAndParseWideCSV(url, searchId, prefix) {
+            if (!url || !url.startsWith('http')) return null;
+            
+            const response = await fetch(url);
+            const text = await response.text();
+            
+            // Clean up Windows line breaks and split into rows
+            const rows = text.replace(/\r/g, '').split('\n').map(r => r.split(','));
+            const headers = rows[0]; 
+            
+            // Find the row where Index No (Column 1) matches the search ID
+            const studentRow = rows.find(row => row.length > 1 && row[1].trim().toUpperCase() === searchId);
+            
+            if (!studentRow) return null;
+
+            let labels = [];
+            let data = [];
+            
+            // Loop through the columns starting at index 2 (skipping Name and Index No)
+            for (let i = 2; i < headers.length; i++) {
+                const mark = studentRow[i] ? studentRow[i].trim() : '';
+                if (mark !== '') { // Only plot if they actually have a mark
+                    labels.push(`${prefix} ${headers[i].trim()}`);
+                    data.push(parseFloat(mark));
+                }
+            }
+
+            return {
+                name: studentRow[0].trim(),
+                labels: labels,
+                data: data
+            };
+        }
+
+        async function login() {
+            const year = document.getElementById('year').value;
+            const studentId = document.getElementById('studentId').value.trim().toUpperCase();
+            const btn = document.getElementById('loginBtn');
+            const errorMsg = document.getElementById('errorMsg');
+
+            if (!studentId) return;
+
+            btn.innerText = "Loading...";
+            btn.disabled = true;
+            errorMsg.classList.add('hidden');
+
+            try {
+                // Fetch both CSVs concurrently
+                const chempulseUrl = chempulseLinks[year];
+                const examsUrl = examLinks[year];
+
+                const [chempulseData, examData] = await Promise.all([
+                    fetchAndParseWideCSV(chempulseUrl, studentId, 'Paper'),
+                    fetchAndParseWideCSV(examsUrl, studentId, 'Exam')
+                ]);
+
+                if (!chempulseData && !examData) throw new Error("ID not found");
+
+                // Set student name (fallback to whichever CSV had the data)
+                const studentName = (chempulseData && chempulseData.name) || (examData && examData.name);
+                document.getElementById('studentNameDisplay').innerText = studentName;
+                document.getElementById('studentIdDisplay').innerText = studentId;
+
+                // Draw Charts
+                if (chempulseData) drawChart('chempulseChart', chempulseData.labels, chempulseData.data, '#2563eb', 'Chempulse Marks');
+                if (examData) drawChart('examChart', examData.labels, examData.data, '#16a34a', 'Exam Marks');
+
+                // Show Dashboard
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('dashboard').classList.remove('hidden');
+
+            } catch (error) {
+                console.error(error);
+                errorMsg.classList.remove('hidden');
+            } finally {
+                btn.innerText = "Access Dashboard";
+                btn.disabled = false;
+            }
+        }
+
+        function drawChart(canvasId, labels, data, color, labelText) {
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            
+            if (canvasId === 'chempulseChart' && chempulseChart) chempulseChart.destroy();
+            if (canvasId === 'examChart' && examChart) examChart.destroy();
+
+            const chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: labelText,
+                        data: data,
+                        borderColor: color,
+                        backgroundColor: color + '20',
+                        borderWidth: 3,
+                        tension: 0.3,
+                        fill: true,
+                        pointBackgroundColor: color,
+                        pointRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: { y: { beginAtZero: true, max: 100 } }
+                }
+            });
+
+            if (canvasId === 'chempulseChart') chempulseChart = chart;
+            if (canvasId === 'examChart') examChart = chart;
+        }
+
+        function switchTab(tab) {
+            document.getElementById('tab-chempulse').classList.add('hidden');
+            document.getElementById('tab-exams').classList.add('hidden');
+            document.getElementById('tab-' + tab).classList.remove('hidden');
+
+            const btnActive = "flex-1 py-2 px-4 rounded-lg font-semibold text-sm transition bg-blue-600 text-white".split(' ');
+            const btnInactive = "flex-1 py-2 px-4 rounded-lg font-semibold text-sm transition bg-slate-100 text-slate-600 hover:bg-slate-200".split(' ');
+
+            document.getElementById('btn-chempulse').classList.remove(...btnActive);
+            document.getElementById('btn-chempulse').classList.add(...btnInactive);
+            document.getElementById('btn-exams').classList.remove(...btnActive);
+            document.getElementById('btn-exams').classList.add(...btnInactive);
+
+            document.getElementById('btn-' + tab).classList.remove(...btnInactive);
+            document.getElementById('btn-' + tab).classList.add(...btnActive);
+        }
+
+        function logout() {
+            document.getElementById('dashboard').classList.add('hidden');
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('studentId').value = '';
+        }
+    </script>
+    <style>
+        .animate-fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</body>
+</html>
