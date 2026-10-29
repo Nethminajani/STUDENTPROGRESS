@@ -70,7 +70,7 @@
         </div>
     </div>
 
-    <script>
+   <script>
         // YOUR LIVE GOOGLE SHEETS CSV LINKS
         const chempulseLinks = {
             "2028": "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ4zXL7M9u7lRcLNWze91wU_W1L6PWLxpjpvFXI5wjHEu__BoHfj2QWCL_4KpdrR-V1puyMfByyFqj6/pub?gid=2083058040&single=true&output=csv",
@@ -80,7 +80,7 @@
         };
 
         const examLinks = {
-            "2028": "YOUR_MONTHLY_EXAMS_CSV_LINK_HERE", // Replace this when you publish the Exams tab
+            "2028": "", // Leave empty until you have an exam link
             "2027": "",
             "2026": "",
             "2025": ""
@@ -89,39 +89,57 @@
         let chempulseChart = null;
         let examChart = null;
 
-        // Custom function to parse your wide CSV format (Name, Index No, Paper 1, Paper 2...)
+        // Auto-detect headers and use a proxy to prevent GitHub CORS blocks
         async function fetchAndParseWideCSV(url, searchId, prefix) {
             if (!url || !url.startsWith('http')) return null;
             
-            const response = await fetch(url);
-            const text = await response.text();
+            // Using the proxy just in case GitHub Pages is being blocked
+            const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
             
-            // Clean up Windows line breaks and split into rows
-            const rows = text.replace(/\r/g, '').split('\n').map(r => r.split(','));
-            const headers = rows[0]; 
-            
-            // Find the row where Index No (Column 1) matches the search ID
-            const studentRow = rows.find(row => row.length > 1 && row[1].trim().toUpperCase() === searchId);
-            
-            if (!studentRow) return null;
-
-            let labels = [];
-            let data = [];
-            
-            // Loop through the columns starting at index 2 (skipping Name and Index No)
-            for (let i = 2; i < headers.length; i++) {
-                const mark = studentRow[i] ? studentRow[i].trim() : '';
-                if (mark !== '') { // Only plot if they actually have a mark
-                    labels.push(`${prefix} ${headers[i].trim()}`);
-                    data.push(parseFloat(mark));
+            try {
+                const response = await fetch(proxyUrl);
+                if (!response.ok) return null;
+                const text = await response.text();
+                
+                // Clean up Windows line breaks and split into rows
+                const rows = text.replace(/\r/g, '').split('\n').map(r => r.split(','));
+                
+                // Find the first row that actually has the word "Name" or "Index No" in it to use as headers
+                let headerRowIndex = 0;
+                for (let i = 0; i < rows.length; i++) {
+                    if (rows[i].some(col => col.toLowerCase().includes('index') || col.toLowerCase().includes('name'))) {
+                        headerRowIndex = i;
+                        break;
+                    }
                 }
-            }
+                const headers = rows[headerRowIndex]; 
+                
+                // Find the student's row
+                const studentRow = rows.find(row => row.length > 1 && row[1] && row[1].trim().toUpperCase() === searchId);
+                
+                if (!studentRow) return null;
 
-            return {
-                name: studentRow[0].trim(),
-                labels: labels,
-                data: data
-            };
+                let labels = [];
+                let data = [];
+                
+                // Loop through columns starting after Index No
+                for (let i = 2; i < headers.length; i++) {
+                    const mark = studentRow[i] ? studentRow[i].trim() : '';
+                    if (mark !== '' && !isNaN(mark)) { // Only plot valid numbers
+                        labels.push(`${prefix} ${headers[i].trim()}`);
+                        data.push(parseFloat(mark));
+                    }
+                }
+
+                return {
+                    name: studentRow[0].trim(),
+                    labels: labels,
+                    data: data
+                };
+            } catch (e) {
+                console.error("Data fetch error:", e);
+                return null;
+            }
         }
 
         async function login() {
@@ -137,7 +155,6 @@
             errorMsg.classList.add('hidden');
 
             try {
-                // Fetch both CSVs concurrently
                 const chempulseUrl = chempulseLinks[year];
                 const examsUrl = examLinks[year];
 
@@ -146,18 +163,23 @@
                     fetchAndParseWideCSV(examsUrl, studentId, 'Exam')
                 ]);
 
-                if (!chempulseData && !examData) throw new Error("ID not found");
+                if (!chempulseData && !examData) throw new Error("ID not found or blocked.");
 
-                // Set student name (fallback to whichever CSV had the data)
                 const studentName = (chempulseData && chempulseData.name) || (examData && examData.name);
                 document.getElementById('studentNameDisplay').innerText = studentName;
                 document.getElementById('studentIdDisplay').innerText = studentId;
 
-                // Draw Charts
-                if (chempulseData) drawChart('chempulseChart', chempulseData.labels, chempulseData.data, '#2563eb', 'Chempulse Marks');
-                if (examData) drawChart('examChart', examData.labels, examData.data, '#16a34a', 'Exam Marks');
+                if (chempulseData && chempulseData.labels.length > 0) {
+                    drawChart('chempulseChart', chempulseData.labels, chempulseData.data, '#2563eb', 'Chempulse Marks');
+                }
+                
+                if (examData && examData.labels.length > 0) {
+                    drawChart('examChart', examData.labels, examData.data, '#16a34a', 'Exam Marks');
+                    document.getElementById('btn-exams').style.display = 'block'; // Show tab if data exists
+                } else {
+                    document.getElementById('btn-exams').style.display = 'none'; // Hide tab if no exams
+                }
 
-                // Show Dashboard
                 document.getElementById('login-screen').classList.add('hidden');
                 document.getElementById('dashboard').classList.remove('hidden');
 
@@ -223,6 +245,9 @@
             document.getElementById('dashboard').classList.add('hidden');
             document.getElementById('login-screen').classList.remove('hidden');
             document.getElementById('studentId').value = '';
+            
+            // Reset to default tab
+            switchTab('chempulse');
         }
     </script>
     <style>
